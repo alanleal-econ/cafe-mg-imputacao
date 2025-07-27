@@ -1,0 +1,630 @@
+---
+title: "Análise Espacial das Exportações de Café Arábica em Minas Gerais"
+subtitle: "Imputação e Visualização de Dados Municipais - 2023"
+author: "Alan Leal"
+date: "26 de julho de 2025"
+output:
+  html_document:
+    theme: journal
+    highlight: tango
+    toc: true
+    toc_float: 
+      collapsed: false
+      smooth_scroll: true
+    toc_depth: 3
+    number_sections: true
+    code_folding: show
+    df_print: paged
+    css: |
+      <style>
+        body {
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+          background-color: #fefefe;
+          color: #2c3e50;
+        }
+        .main-container {
+          max-width: 1200px;
+          margin: auto;
+        }
+        h1, h2, h3, h4, h5, h6 {
+          color: #d35400;
+          font-weight: bold;
+        }
+        .title {
+          color: #d35400;
+          font-size: 2.5em;
+          font-weight: bold;
+          text-align: center;
+          margin-bottom: 0.2em;
+        }
+        .subtitle {
+          color: #7f8c8d;
+          font-size: 1.2em;
+          text-align: center;
+          margin-bottom: 0.5em;
+        }
+        .author {
+          text-align: center;
+          color: #34495e;
+          font-size: 1.1em;
+          margin-bottom: 0.2em;
+        }
+        .date {
+          text-align: center;
+          color: #7f8c8d;
+          font-size: 1em;
+          margin-bottom: 2em;
+        }
+        .navbar-default {
+          background-color: #e67e22;
+          border-color: #d35400;
+        }
+        .navbar-default .navbar-nav > li > a {
+          color: white;
+        }
+        .navbar-default .navbar-nav > li > a:hover {
+          color: #f39c12;
+        }
+        pre {
+          background-color: #f8f9fa;
+          border: 1px solid #e9ecef;
+          border-radius: 5px;
+          padding: 15px;
+        }
+        code {
+          background-color: #f8f9fa;
+          color: #e67e22;
+          padding: 2px 4px;
+          border-radius: 3px;
+        }
+        .alert {
+          border-radius: 5px;
+          margin: 20px 0;
+        }
+        .alert-info {
+          background-color: #fff3cd;
+          border-color: #f39c12;
+          color: #856404;
+        }
+        .section.level1 {
+          margin-top: 40px;
+          margin-bottom: 30px;
+        }
+        .section.level2 {
+          margin-top: 30px;
+          margin-bottom: 20px;
+        }
+        .toc-content {
+          background-color: #fff8f0;
+          border-left: 4px solid #e67e22;
+          padding: 20px;
+          margin: 20px 0;
+        }
+        table {
+          margin: 20px 0;
+        }
+        .table th {
+          background-color: #e67e22;
+          color: white;
+          font-weight: bold;
+        }
+        .table-striped > tbody > tr:nth-of-type(odd) {
+          background-color: #fff8f0;
+        }
+        blockquote {
+          border-left: 4px solid #e67e22;
+          background-color: #fff8f0;
+          padding: 15px 20px;
+          margin: 20px 0;
+          font-style: italic;
+        }
+      </style>
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 12,
+  fig.height = 8,
+  fig.align = "center",
+  cache = FALSE
+)
+
+# Limpeza do ambiente
+rm(list = ls())
+
+# Configuração de opções
+options(scipen = 999, digits = 2)
+```
+
+# Introdução
+Essa página implementa o algoritmo desenvolvido por Leal e Martins (2025), sobre imputação de exportações ao nível municipal, para imputar as exportações de café nos municípios mineiros em 2023. Usamos também o pacote comexTL desenvolvido por (Alan) Leal para lidar com os dados de comex brasileiro com maior facilidade no R. Os dados de área colhida do café em 2023 foram obtidos na PAM, como distribuídos pelo Base dos Dados. 
+
+# Carregamento de Pacotes
+
+```{r pacotes}
+# Lista de pacotes necessários
+pacotes <- c(
+  "comexTL",      # Dados de comércio exterior
+  "tidyverse",    # Manipulação de dados
+  "sf",           # Dados espaciais
+  "spdep",        # Econometria espacial
+  "ggplot2",      # Gráficos
+  "leaflet",      # Mapas interativos
+  "plotly",       # Gráficos interativos
+  "DT",           # Tabelas interativas
+  "kableExtra",   # Formatação de tabelas
+  "viridis",      # Paletas de cores
+  "geobr"         # Geometrias do Brasil
+)
+
+# Instalar pacotes que não estão instalados
+novos_pacotes <- pacotes[!(pacotes %in% installed.packages()[,"Package"])]
+if(length(novos_pacotes)) install.packages(novos_pacotes)
+
+# Carregar todos os pacotes
+lapply(pacotes, library, character.only = TRUE)
+```
+
+# Definição de Funções Auxiliares
+
+```{r funcoes}
+# Função para formatar valores monetários
+format_currency <- function(x) {
+  paste0("US$ ", format(round(x), big.mark = ".", decimal.mark = ","))
+}
+
+# Tema personalizado para gráficos
+theme_cafe <- function(base_size = 12) {
+  theme_minimal(base_size = base_size) +
+    theme(
+      plot.background = element_rect(fill = "white", color = NA),
+      panel.background = element_rect(fill = "white", color = NA),
+      plot.title = element_text(
+        color = "#d35400", 
+        size = 16, 
+        face = "bold",
+        hjust = 0.5,
+        margin = margin(b = 20)
+      ),
+      plot.subtitle = element_text(
+        color = "#7f8c8d",
+        size = 12,
+        hjust = 0.5,
+        margin = margin(b = 15)
+      ),
+      axis.title = element_text(color = "#2c3e50", size = 11, face = "bold"),
+      axis.text = element_text(color = "#34495e", size = 10),
+      legend.title = element_text(color = "#d35400", face = "bold"),
+      legend.text = element_text(color = "#2c3e50"),
+      panel.grid.major = element_line(color = "#ecf0f1", size = 0.5),
+      panel.grid.minor = element_blank(),
+      strip.text = element_text(color = "#d35400", face = "bold")
+    )
+}
+```
+
+# Carregamento e Preparação dos Dados
+
+```{r dados_pam}
+cat("📊 Carregando dados de área colhida (PAM/IBGE)...\n")
+
+# URL dos dados
+data_url <- "https://raw.githubusercontent.com/alanleal-econ/cafe-mg-imputacao/refs/heads/main/cafe_arabica_pam.csv"
+
+# Carregamento dos dados de área colhida (PAM/IBGE)
+pam <- readr::read_csv(data_url, show_col_types = FALSE)
+
+# Vetor r: proporção da área colhida por município
+area_mg <- pam %>%
+  filter(sigla_uf == "MG", ano == 2023) %>%
+  group_by(id_municipio) %>%
+  summarise(
+    area = sum(area_colhida, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  mutate(r = area / sum(area, na.rm = TRUE)) %>%
+  filter(area > 0)  # Remove municípios sem produção
+
+cat("✅ Municípios com produção de café:", nrow(area_mg), "\n")
+```
+
+# Dados de Exportação Municipal (HS4)
+
+```{r dados_exportacao}
+cat("📈 Carregando dados de exportação municipal (HS4)...\n")
+
+# Dados de exportação municipal (SH4 = 901: Café)
+exp_sh4 <- analise_comex_municipal(
+  tipo = "exportacao",
+  anos = 2023,
+  sh4 = 901,
+  sg_uf_mun = "MG",
+  agregar_por = "CO_MUN"
+)
+
+# Preparação do vetor E4 (exportações municipais HS4)
+E4 <- exp_sh4 %>% 
+  select(CO_MUN, VL_FOB) %>%
+  rename(exp_sh4 = VL_FOB)
+
+cat("✅ Municípios exportadores (HS4):", nrow(E4), "\n")
+```
+
+# Cálculo do Fator de Conversão
+
+```{r fator_conversao}
+cat("🔄 Calculando fator de conversão HS4 → HS6...\n")
+
+# Cálculo do total estadual e fator de conversão
+tot_sh4 <- sum(E4$exp_sh4)
+
+exp_sh6_state <- comex_stat_geral_exps(
+  anos = 2023,
+  sh6 = 090111,  # Café arábica não torrado
+  sg_uf_ncm = "MG"
+)
+
+alpha <- sum(exp_sh6_state$VL_FOB) / tot_sh4
+
+# Estatísticas preliminares
+cat("\n📊 ESTATÍSTICAS PRELIMINARES:\n")
+cat("   • Total exportações HS4 (MG):", format_currency(tot_sh4), "\n")
+cat("   • Total exportações HS6 (MG):", format_currency(sum(exp_sh6_state$VL_FOB)), "\n")
+cat("   • Fator de conversão (α):", round(alpha, 4), "\n")
+cat("   • Municípios com produção:", nrow(area_mg), "\n")
+cat("   • Municípios exportadores (HS4):", nrow(E4), "\n")
+```
+
+# Matriz de Pesos Espaciais
+
+```{r matriz_pesos}
+cat("\n🗺️  Criando matriz de pesos espaciais...\n")
+
+# Carregamento das geometrias municipais
+uf_mun <- geobr::read_municipality(year = 2020) %>% 
+  filter(code_state == 31) %>%  # Código de MG
+  select(code_muni, name_muni, geom)
+
+cat("✅ Geometrias carregadas para", nrow(uf_mun), "municípios\n")
+
+# Cálculo dos centroides e matriz de distâncias
+coords <- sf::st_centroid(uf_mun)
+dist_mat <- sf::st_distance(coords)
+
+# Matriz de pesos: inverso da distância
+inv_dist <- 1 / as.matrix(dist_mat)
+diag(inv_dist) <- 0  # Remove auto-correlação
+
+# Normalização por linha (matriz estocástica)
+W <- inv_dist / rowSums(inv_dist)
+rownames(W) <- uf_mun$code_muni
+colnames(W) <- uf_mun$code_muni
+
+cat("✅ Matriz de pesos espaciais criada (", nrow(W), "x", ncol(W), ")\n")
+```
+
+# Imputação Espacial
+
+```{r imputacao}
+cat("\n🎯 Executando imputação espacial...\n")
+
+# Preparação dos vetores na ordem correta
+E4_vec <- E4$exp_sh4[match(uf_mun$code_muni, E4$CO_MUN)]
+E4_vec[is.na(E4_vec)] <- 0
+
+r_vec <- area_mg$r[match(uf_mun$code_muni, area_mg$id_municipio)]
+r_vec[is.na(r_vec)] <- 0
+
+# Imputação espacial seguindo a metodologia:
+# E₆ᵢ = α × Σⱼ wᵢⱼ × E₄ⱼ + rᵢ × (E₆⁻ᴹᴳ - Σᵢ α × Σⱼ wᵢⱼ × E₄ⱼ)
+
+spatial_comp <- alpha * (W %*% E4_vec)
+total_spatial <- sum(spatial_comp)
+residual <- sum(exp_sh6_state$VL_FOB) - total_spatial
+
+adj_comp <- r_vec * residual
+E6_est <- spatial_comp + adj_comp
+
+# Adição dos resultados ao dataframe espacial
+uf_mun$E6_imputado <- as.numeric(E6_est)
+uf_mun$E4_observado <- E4_vec
+uf_mun$componente_espacial <- as.numeric(spatial_comp)
+uf_mun$componente_area <- as.numeric(adj_comp)
+uf_mun$prop_area <- r_vec
+
+cat("✅ Imputação concluída!\n")
+cat("   • Total imputado:", format_currency(sum(uf_mun$E6_imputado)), "\n")
+cat("   • Diferença com oficial:", format_currency(sum(uf_mun$E6_imputado) - sum(exp_sh6_state$VL_FOB)), "\n")
+```
+
+# Análise dos Resultados
+
+```{r analise_resultados}
+cat("\n📊 Analisando resultados...\n")
+
+# Estatísticas finais
+final_stats <- uf_mun %>%
+  st_set_geometry(NULL) %>%
+  summarise(
+    municipios_total = n(),
+    municipios_produtores = sum(prop_area > 0, na.rm = TRUE),
+    municipios_exportadores_hs4 = sum(E4_observado > 0, na.rm = TRUE),
+    municipios_imputados = sum(E6_imputado > 0, na.rm = TRUE),
+    total_imputado = sum(E6_imputado, na.rm = TRUE),
+    media_imputada = mean(E6_imputado[E6_imputado > 0], na.rm = TRUE),
+    mediana_imputada = median(E6_imputado[E6_imputado > 0], na.rm = TRUE),
+    max_imputado = max(E6_imputado, na.rm = TRUE),
+    .groups = 'drop'
+  )
+
+# Análise dos componentes
+component_summary <- uf_mun %>%
+  st_set_geometry(NULL) %>%
+  filter(E6_imputado > 0) %>%
+  summarise(
+    total_imputado = sum(E6_imputado),
+    total_espacial = sum(componente_espacial),
+    total_area = sum(componente_area),
+    .groups = 'drop'
+  ) %>%
+  mutate(
+    perc_espacial = (total_espacial / total_imputado) * 100,
+    perc_area = (total_area / total_imputado) * 100
+  )
+
+# Preparação dos dados do ranking
+top_exporters <- uf_mun %>%
+  st_set_geometry(NULL) %>%
+  filter(E6_imputado > 0) %>%
+  arrange(desc(E6_imputado)) %>%
+  slice_head(n = 15) %>%
+  mutate(
+    rank = row_number(),
+    participacao = (E6_imputado / sum(exp_sh6_state$VL_FOB)) * 100,
+    exp_milhoes = E6_imputado / 1e6
+  ) %>%
+  select(
+    rank, name_muni, E6_imputado, participacao, 
+    E4_observado, componente_espacial, componente_area
+  )
+```
+
+# Visualizações
+
+## Mapa Interativo das Exportações
+
+```{r mapa_interativo}
+cat("   • Mapa interativo das exportações...\n")
+
+# Paleta de cores
+pal <- colorNumeric(
+  palette = viridis::viridis(100, option = "plasma"),
+  domain = range(uf_mun$E6_imputado[uf_mun$E6_imputado > 0], na.rm = TRUE),
+  na.color = "transparent"
+)
+
+# Mapa interativo
+mapa_exportacoes <- leaflet(uf_mun, options = leafletOptions(zoomControl = TRUE)) %>%
+  addProviderTiles(
+    "CartoDB.Positron",
+    options = providerTileOptions(opacity = 0.8)
+  ) %>%
+  addPolygons(
+    weight = 0.8,
+    color = "#ffffff",
+    fillColor = ~pal(E6_imputado),
+    fillOpacity = 0.8,
+    smoothFactor = 0.2,
+    popup = ~paste0(
+      "<div style='font-family: Arial; font-size: 12px;'>",
+      "<b>", name_muni, "</b><br/>",
+      "<b>Exportações HS6:</b> ", format_currency(E6_imputado), "<br/>",
+      "<b>Exportações HS4:</b> ", format_currency(E4_observado), "<br/>",
+      "<b>% da Área Estadual:</b> ", round(prop_area * 100, 2), "%",
+      "</div>"
+    ),
+    popupOptions = popupOptions(maxWidth = 300),
+    highlightOptions = highlightOptions(
+      weight = 3,
+      color = "#d35400",
+      fillOpacity = 0.9,
+      bringToFront = TRUE
+    )
+  ) %>%
+  addLegend(
+    pal = pal, 
+    values = ~E6_imputado,
+    title = "Exportações HS6<br/>(US$ milhares)",
+    position = "bottomright",
+    opacity = 0.8,
+    labFormat = labelFormat(
+      transform = function(x) x / 1000,
+      suffix = "k"
+    )
+  ) %>%
+  setView(lng = -44.5, lat = -18.5, zoom = 7)
+
+mapa_exportacoes
+```
+
+## Gráfico do Top 10 Exportadores
+
+```{r grafico_top10}
+cat("   • Gráfico do Top 10 exportadores...\n")
+
+top10_data <- top_exporters %>%
+  slice_head(n = 10) %>%
+  mutate(
+    name_muni = str_wrap(name_muni, width = 15),
+    exp_milhoes = E6_imputado / 1e6
+  )
+
+grafico_top10 <- ggplot(top10_data, aes(x = reorder(name_muni, exp_milhoes), y = exp_milhoes)) +
+  geom_col(
+    fill = "#e67e22",
+    alpha = 0.8,
+    width = 0.7
+  ) +
+  geom_text(
+    aes(label = paste0("US$ ", round(exp_milhoes, 1), "M")),
+    hjust = -0.1,
+    color = "#2c3e50",
+    size = 3.5,
+    fontface = "bold"
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    expand = expansion(mult = c(0, 0.15)),
+    labels = function(x) paste0("US$ ", x, "M")
+  ) +
+  labs(
+    title = "Top 10 Exportadores de Café Arábica",
+    subtitle = "Minas Gerais - 2023 (Valores Imputados)",
+    x = NULL,
+    y = "Exportações (US$ Milhões)",
+    caption = "Fonte: Elaboração própria com dados SECEX/IBGE"
+  ) +
+  theme_cafe() +
+  theme(
+    axis.text.y = element_text(size = 10),
+    plot.margin = margin(20, 20, 20, 20)
+  )
+
+print(grafico_top10)
+```
+
+## Gráfico de Composição dos Componentes
+
+```{r grafico_componentes}
+cat("   • Gráfico de composição dos componentes...\n")
+
+component_data <- data.frame(
+  Componente = c("Componente Espacial", "Componente por Área"),
+  Valor = c(component_summary$total_espacial, component_summary$total_area),
+  Percentual = c(component_summary$perc_espacial, component_summary$perc_area)
+)
+
+grafico_componentes <- ggplot(component_data, aes(x = "", y = Percentual, fill = Componente)) +
+  geom_bar(stat = "identity", width = 1, color = "white", size = 2) +
+  coord_polar("y", start = 0) +
+  scale_fill_manual(
+    values = c("#e67e22", "#3498db"),
+    labels = paste0(component_data$Componente, "\n(", round(component_data$Percentual, 1), "%)")
+  ) +
+  labs(
+    title = "Composição da Imputação Total",
+    subtitle = paste0("Total Imputado: ", format_currency(component_summary$total_imputado)),
+    fill = "Componentes"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(color = "#d35400", size = 16, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(color = "#7f8c8d", size = 12, hjust = 0.5),
+    legend.position = "bottom",
+    legend.title = element_text(color = "#d35400", face = "bold"),
+    legend.text = element_text(color = "#2c3e50", size = 10)
+  )
+
+print(grafico_componentes)
+```
+
+## Mapa do Componente Espacial
+
+```{r mapa_componente}
+cat("   • Mapa do componente espacial...\n")
+
+uf_mun_filtered <- uf_mun %>%
+  filter(E6_imputado > 0)
+
+pal_espacial <- colorNumeric("Oranges", domain = uf_mun_filtered$componente_espacial)
+
+mapa_componente_espacial <- leaflet(uf_mun_filtered) %>%
+  addProviderTiles("CartoDB.Positron") %>%
+  addPolygons(
+    weight = 0.5,
+    color = "white",
+    fillColor = ~pal_espacial(componente_espacial),
+    fillOpacity = 0.7,
+    popup = ~paste0(
+      "<b>", name_muni, "</b><br/>",
+      "Componente Espacial: ", format_currency(componente_espacial)
+    )
+  ) %>%
+  addLegend(
+    pal = pal_espacial,
+    values = ~componente_espacial,
+    title = "Componente<br/>Espacial (US$)",
+    position = "bottomright"
+  ) %>%
+  setView(lng = -44.5, lat = -18.5, zoom = 7)
+
+mapa_componente_espacial
+```
+
+# Tabelas Resumo
+
+
+## Ranking dos Top 15 Exportadores
+
+```{r tabela_ranking}
+# Tabela do ranking Top 15
+tabela_ranking <- top_exporters %>%
+  mutate(
+    `Exportações HS6` = format_currency(E6_imputado),
+    `Participação (%)` = paste0(round(participacao, 2), "%"),
+    `Exportações HS4` = format_currency(E4_observado),
+    `Comp. Espacial` = format_currency(componente_espacial),
+    `Comp. Área` = format_currency(componente_area)
+  ) %>%
+  select(
+    `Ranking` = rank,
+    `Município` = name_muni,
+    `Exportações HS6`,
+    `Participação (%)`,
+    `Exportações HS4`,
+    `Comp. Espacial`,
+    `Comp. Área`
+  )
+
+kable(tabela_ranking, 
+      caption = "Ranking dos Top 15 Exportadores Municipais", 
+      align = c("c", "l", "r", "r", "r", "r", "r")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"),
+                full_width = TRUE,
+                position = "center",
+                font_size = 12) %>%
+  row_spec(0, bold = TRUE, color = "white", background = "#e67e22") %>%
+  column_spec(1, bold = TRUE, color = "#d35400") %>%
+  column_spec(2, bold = TRUE)
+```
+
+
+# Resultados Principais
+
+```{r resultados_finais}
+cat("\n🎉 ANÁLISE CONCLUÍDA!\n")
+cat("\n📊 PRINCIPAIS CONCLUSÕES:\n")
+cat("1. Cobertura Territorial: Imputação para", final_stats$municipios_imputados, "municípios\n")
+cat("2. Concentração: Top 10 representa", round(sum(top_exporters$participacao[1:10]), 1), "% do total estadual\n")
+cat("3. Validação: Total imputado corresponde ao valor oficial estadual\n")
+cat("4. Componente Espacial:", round(component_summary$perc_espacial, 1), "% da imputação total\n")
+
+cat("\n🏆 TOP 5 EXPORTADORES:\n")
+for(i in 1:5) {
+  cat(sprintf("%d. %s: %s\n", 
+              i, 
+              top_exporters$name_muni[i], 
+              format_currency(top_exporters$E6_imputado[i])))
+}
+
+cat("\n✨ Script executado com sucesso!\n")
+```
+
+---
+
+> **Nota metodológica:** Esta análise implementa uma metodologia de imputação espacial para estimar exportações municipais de café arábica (HS6: 090111) baseada em dados agregados estaduais e informações de área colhida municipal. A imputação combina componentes espaciais (baseados em spillovers de municípios exportadores) e componente por área de produção, garantindo que o total imputado corresponda exatamente ao valor oficial estadual.
+
+---
