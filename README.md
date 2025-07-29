@@ -129,9 +129,9 @@ GitHub: https://github.com/seu-usuario/cafe-mg-imputacao
 ## 👨‍💻 Autor
 
 **Alan Leal**
-- Email: [seu-email@exemplo.com]
+- Email: [leal@thetalab.com.br]
 - GitHub: [@alanleal-econ]
-- LinkedIn: [seu-perfil-linkedin]
+- LinkedIn: [www.linkedin.com/in/alanmarquesleal]
 
 ## 📄 Licença
 
